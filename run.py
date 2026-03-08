@@ -2,7 +2,7 @@ import pyzipper
 import os
 import sys
 
-ZIP_PATH = "app.zip"
+ZIP_PATH = "toffee.zip"
 OUT_DIR = "."
 
 pwd = os.environ.get("ZIP_PWD")
