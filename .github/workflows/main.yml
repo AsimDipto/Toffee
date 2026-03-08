@@ -1,4 +1,4 @@
-name: "Ultra-Sync-Final-v4"
+name: "Toffee Auto Update"
 
 on:
   schedule:
@@ -6,72 +6,121 @@ on:
   workflow_dispatch:
 
 jobs:
-  engine:
+  core-update:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-      - name: Checkout Repository
+      - name: Fetch Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Initialize Environment
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install Dependencies
         run: pip install requests pyzipper
 
-      - name: Process Core Extraction & Header Injection
+      - name: Decrypt and Process Assets
         env:
           ZIP_PWD: ${{ secrets.ZIP_PWD }}
+          SOURCE_URL: "https://apis.allinonedev.top/tf/"
+          UA_MOBILE: "Toffee (Linux;Android 14)"
         run: |
           python3 - << 'EOF'
-          import pyzipper, os, json, sys
+          import requests, json, os, sys, pyzipper
+          from datetime import datetime
 
-          # 1. Extraction Logic
-          try:
-              with pyzipper.AESZipFile("toffee.zip", 'r') as zf:
-                  zf.setpassword(os.environ.get("ZIP_PWD").encode())
-                  zf.extractall(path=".")
-              print("[+] Extraction Success")
-          except Exception as e:
-              print(f"[-] Extraction Failed: {e}")
-              sys.exit(0)
+          def run_secured_sync():
+              zip_file = "toffee.zip"
+              out_dir = "."
+              password = os.environ.get("ZIP_PWD")
 
-          # 2. Playlist Generator with Raw Headlines
-          if os.path.exists("api.json"):
-              with open("api.json", "r", encoding="utf-8") as f:
-                  data = json.load(f)
-              
-              # আপনার র (Raw) টেক্সট হেডলাইন
-              # এটি #EXTM3U এর ঠিক নিচে থাকবে এবং চ্যানেল হিসেবে আসবে না
-              m3u_output = "#EXTM3U\n"
-              m3u_output += "# Creator : Asim Dipto\n"
-              m3u_output += "# Fuck you Ankita\n\n"
-              
-              for ch in data:
-                  name = ch.get("name")
-                  link = ch.get("link")
-                  logo = ch.get("logo", "")
-                  cat = ch.get("category_name", "Live TV")
-                  ck = ch.get("cookie", "")
+              if not password:
+                  print("[-] Security Error: ZIP_PWD not set.")
+                  sys.exit(1)
 
-                  if name and link:
-                      m3u_output += f'#EXTINF:-1 group-title="{cat}" tvg-logo="{logo}", {name}\n'
-                      m3u_output += f'#EXTVLCOPT:http-user-agent=Toffee (Linux;Android 14)\n'
-                      if ck:
-                          m3u_output += f'#EXTVLCOPT:http-cookie={ck}\n'
-                      m3u_output += f'{link}\n\n'
+              try:
+                  # Extraction phase
+                  with pyzipper.AESZipFile(zip_file, 'r') as zf:
+                      zf.setpassword(password.encode())
+                      zf.extractall(path=out_dir)
+                  
+                  # Identify extracted data dynamically to maintain privacy
+                  # Assuming the source file is a JSON format
+                  data_file = "api.json" 
+                  if not os.path.exists(data_file):
+                      print("[-] Integrity Error: Required assets not found.")
+                      return
 
-              # দুই ফাইলে সেভ করা
-              for filename in ["Toffee_NS_Player.m3u", "Toffee_Ott_Navigator.m3u"]:
-                  with open(filename, "w", encoding="utf-8") as f:
-                      f.write(m3u_output)
-              print("[+] Headlines Injected Successfully")
+                  # Fetch session token
+                  source_url = os.environ.get("SOURCE_URL")
+                  response = requests.get(source_url, timeout=25)
+                  session_key = response.json().get("set_cookie", "")
+                  
+                  if not session_key:
+                      print("[-] Network Error: Authentication failed.")
+                      return
+
+                  with open(data_file, "r", encoding="utf-8") as f:
+                      stream_list = json.load(f)
+
+                  vlc_data = []
+                  m3u_header = "#EXTM3U\n# Creator : Asim Dipto\n# Fuck you Ankita\n\n"
+                  m3u_body = ""
+
+                  for item in stream_list:
+                      url = item.get("link")
+                      if not url: continue
+
+                      title = item.get("name", "Unknown")
+                      thumb = item.get("logo", "")
+                      genre = item.get("category_name", "General")
+
+                      vlc_data.append({
+                          "name": title,
+                          "logo": thumb,
+                          "link": url,
+                          "cookie": session_key
+                      })
+
+                      m3u_body += f'#EXTINF:-1 group-title="{genre}" tvg-logo="{thumb}", {title}\n'
+                      m3u_body += f'#EXTVLCOPT:http-user-agent={os.environ.get("UA_MOBILE")}\n'
+                      m3u_body += f'#EXTVLCOPT:http-cookie={session_key}\n'
+                      m3u_body += f'{url}\n\n'
+
+                  # Generating Final Outputs
+                  final_m3u = m3u_header + m3u_body
+
+                  with open("Toffee_NS_Player.m3u", "w", encoding="utf-8") as f:
+                      f.write(final_m3u)
+
+                  with open("Toffee_Ott_Navigator.m3u", "w", encoding="utf-8") as f:
+                      f.write(final_m3u)
+
+                  with open("channels.json", "w", encoding="utf-8") as f:
+                      json.dump(vlc_data, f, indent=4)
+
+                  print("[+] Deployment completed successfully.")
+
+              except Exception as err:
+                  print(f"[!] Runtime Exception: {err}")
+                  sys.exit(1)
+
+          if __name__ == "__main__":
+              run_secured_sync()
           EOF
 
-      - name: Commit and Push
+      - name: Commit and Broadcast
         run: |
-          git config --local user.email "bot@github.com"
-          git config --local user.name "System-Auto-Bot"
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Sync Bot"
           git add .
-          git diff-index --quiet HEAD || (git commit -m "System Update: $(date)" && git push origin main)
+          if ! git diff-index --quiet HEAD; then
+            git commit -m "System Sync: $(date +'%Y-%m-%d %H:%M')"
+            git push origin main
+          else
+            echo "No changes detected."
+          fi
