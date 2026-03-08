@@ -1,4 +1,4 @@
-name: Toffee Cookie Auto Update
+name: Toffee Auto Update
 
 on:
   schedule:
@@ -105,13 +105,13 @@ jobs:
 
               tengo["channels_amount"] = len(ns_json)
 
-              with open("ns.m3u", "w", encoding="utf-8") as f:
+              with open("Toffee_NS_Player.m3u", "w", encoding="utf-8") as f:
                   json.dump(ns_json, f, indent=2)
 
               with open("channels.json", "w", encoding="utf-8") as f:
                   json.dump(ns_json, f, indent=2)
 
-              with open("ott.m3u", "w", encoding="utf-8") as f:
+              with open("Toffee_Ott_Navigator.m3u", "w", encoding="utf-8") as f:
                   f.write(ott_playlist)
 
               with open("tengo.json", "w", encoding="utf-8") as f:
