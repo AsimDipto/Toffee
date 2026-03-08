@@ -1,132 +1,110 @@
-name: Toffee Auto Update
+name: Stream Sync Pro
 
 on:
   schedule:
-
-   - cron: '*/5 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
-  build:
+  core-update:
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - name: Fetch Repository
+        uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - name: Initialize Environment
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
-      - name: Install Requests
+      - name: Install Dependencies
         run: pip install requests
 
-      - name: Execute Update
+      - name: Process Stream Data
         run: |
           python3 - << 'EOF'
-          import requests, json, datetime, os, sys
+          import requests, json, os, sys
+          from datetime import datetime
 
-          API_URL = "https://apis.allinonedev.top/tf/"
-          SRC_JSON = "api.json"
+          # Configuration
+          SOURCE_URL = "https://apis.allinonedev.top/tf/"
+          LOCAL_DB = "api.json"
+          UA_MOBILE = "Toffee (Linux;Android 14)"
 
-          try:
-              # Requesting the API
-              r = requests.get(API_URL, timeout=15)
-              ck = r.json().get("set_cookie", "")
-              
-              if not ck:
-                  print("No cookie received")
-                  sys.exit(0)
-
-              if not os.path.exists(SRC_JSON):
-                  # If api.json doesn't exist, try to create an empty list or exit
-                  print("api.json missing, creating empty list")
-                  channels = [] 
-                  # sys.exit(0) # Commented out to prevent stop if file missing
-              else:
-                  with open(SRC_JSON, "r", encoding="utf-8") as f:
-                      channels = json.load(f)
-
-              ns_json = []
-              ott_playlist = "#EXTM3U\n"
-              updated = datetime.datetime.now().strftime("%d-%m-%Y %I:%M:%S %p")
-
-              tengo = {
-                  "name": "Toffee App All Channel Link with Headers",
-                  "owner": "Bd Coder Boy\nTelegram: https://t.me/codecrafterceo",
-                  "channels_amount": 0,
-                  "updated_on": updated,
-                  "channels": []
-              }
-
-              for ch in channels:
-                  link = ch.get("link")
-                  if not link:
-                      continue
-
-                  name = ch.get("name", "Live")
-                  logo = ch.get("logo", "")
-                  cat  = ch.get("category_name", "Bangladeshi")
+          def run_sync():
+              try:
+                  # Fetch session cookie
+                  response = requests.get(SOURCE_URL, timeout=20)
+                  session_key = response.json().get("set_cookie", "")
                   
-                  # Host parsing safety
-                  try:
-                      host = link.split("//")[-1].split("/")[0]
-                  except:
-                      host = ""
+                  if not session_key:
+                      print("[-] Session key not found.")
+                      return
 
-                  ns_json.append({
-                      "name": name,
-                      "logo": logo,
-                      "link": link,
-                      "cookie": ck
-                  })
+                  # Load local source
+                  if not os.path.exists(LOCAL_DB):
+                      print(f"[-] {LOCAL_DB} not found. Skipping...")
+                      return
+                  
+                  with open(LOCAL_DB, "r", encoding="utf-8") as f:
+                      stream_list = json.load(f)
 
-                  tengo["channels"].append({
-                      "category_name": cat,
-                      "name": name,
-                      "link": link,
-                      "logo": logo,
-                      "headers": {
-                          "Host": host,
-                          "Cookie": ck,
-                          "User-Agent": "Toffee (Linux;Android 14)",
-                          "Accept-Encoding": "gzip"
-                      }
-                  })
+                  vlc_data = []
+                  m3u_content = "#EXTM3U\n"
 
-                  ott_playlist += f'''#EXTINF:-1 group-title="{cat}" tvg-logo="{logo}", {name}
-          #EXTVLCOPT:http-user-agent=Toffee (Linux;Android 14)
-          #EXTVLCOPT:http-cookie={ck}
-          {link}
-          '''
+                  for item in stream_list:
+                      url = item.get("link")
+                      if not url: continue
 
-              tengo["channels_amount"] = len(ns_json)
+                      title = item.get("name", "Unknown")
+                      thumb = item.get("logo", "")
+                      genre = item.get("category_name", "General")
 
-              with open("Toffee_NS_Player.m3u", "w", encoding="utf-8") as f:
-                  json.dump(ns_json, f, indent=2)
+                      # Prepare standard JSON structure
+                      vlc_data.append({
+                          "name": title,
+                          "logo": thumb,
+                          "link": url,
+                          "cookie": session_key
+                      })
 
-              with open("channels.json", "w", encoding="utf-8") as f:
-                  json.dump(ns_json, f, indent=2)
+                      # Build M3U Playlist
+                      m3u_content += f'#EXTINF:-1 group-title="{genre}" tvg-logo="{thumb}", {title}\n'
+                      m3u_content += f'#EXTVLCOPT:http-user-agent={UA_MOBILE}\n'
+                      m3u_content += f'#EXTVLCOPT:http-cookie={session_key}\n'
+                      m3u_content += f'{url}\n'
 
-              with open("Toffee_Ott_Navigator.m3u", "w", encoding="utf-8") as f:
-                  f.write(ott_playlist)
+                  # Saving outputs
+                  with open("Toffee_NS_Player.m3u", "w", encoding="utf-8") as f:
+                      json.dump(vlc_data, f, indent=4)
 
-              with open("tengo.json", "w", encoding="utf-8") as f:
-                  json.dump(tengo, f, indent=2)
+                  with open("channels.json", "w", encoding="utf-8") as f:
+                      json.dump(vlc_data, f, indent=4)
 
-              print("Update completed successfully")
+                  with open("Toffee_Ott_Navigator.m3u", "w", encoding="utf-8") as f:
+                      f.write(m3u_content)
 
-          except Exception as e:
-              print("ERROR:", e)
-              sys.exit(1) # Fail the workflow on error
+                  print("[+] Syncing completed successfully.")
+
+              except Exception as err:
+                  print(f"[!] Critical Error: {err}")
+                  sys.exit(1)
+
+          if __name__ == "__main__":
+              run_sync()
           EOF
 
-      - name: Push Changes
+      - name: Commit and Broadcast
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Sync Bot"
           git add .
-          git diff-index --quiet HEAD || (git commit -m "Auto update $(date)" && git push origin main)
+          if ! git diff-index --quiet HEAD; then
+            git commit -m "System Sync: $(date +'%Y-%m-%d %H:%M')"
+            git push origin main
+          else
+            echo "No changes detected."
+          fi
