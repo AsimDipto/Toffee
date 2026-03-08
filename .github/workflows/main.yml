@@ -23,98 +23,75 @@ jobs:
       - name: Install Dependencies
         run: pip install requests pyzipper
 
-      - name: Process Stream Data
+      - name: Process Double Layer Assets
         env:
           ZIP_PWD: ${{ secrets.ZIP_PWD }}
         run: |
           python3 - << 'EOF'
-          import requests, json, os, sys, pyzipper
-          from datetime import datetime
+          import requests, json, os, sys, pyzipper, zipfile
 
           # Configuration
-          SOURCE_URL = "https://apis.allinonedev.top/tf/"
-          ZIP_PATH = "toffee_up.zip"
+          OUT_DIR = "."
+          FIRST_ZIP = "toffee_update.zip" 
+          INNER_ZIP = "toffee_update.zip" 
           LOCAL_DB = "api.json"
           UA_MOBILE = "Toffee (Linux;Android 14)"
-          OUT_DIR = "."
 
           def run_sync():
-              # Step 1: Unzip the protected file
               pwd = os.environ.get("ZIP_PWD")
               if not pwd:
-                  print("[-] ZIP_PWD secret is missing.")
-                  sys.exit(2)
-
-              if not os.path.exists(ZIP_PATH):
-                  print(f"[-] {ZIP_PATH} not found.")
-                  sys.exit(3)
+                  print("[-] Security Error: ZIP_PWD not set.")
+                  sys.exit(1)
 
               try:
-                  with pyzipper.AESZipFile(ZIP_PATH, 'r') as zf:
-                      zf.setpassword(pwd.encode())
-                      zf.extractall(path=OUT_DIR)
-                  print("[+] Extraction successful.")
-              except Exception as e:
-                  print(f"[-] Extraction error: {e}")
-                  sys.exit(4)
+                  # Layer 1: Extraction (Public)
+                  if os.path.exists(FIRST_ZIP):
+                      with zipfile.ZipFile(FIRST_ZIP, 'r') as z:
+                          z.extractall(OUT_DIR)
+                      print("[+] First layer extracted.")
 
-              # Step 2: Original Stream Sync Logic
-              try:
-                  # Fetch session cookie
-                  response = requests.get(SOURCE_URL, timeout=20)
+                  # Layer 2: Decryption (Protected)
+                  if os.path.exists(INNER_ZIP):
+                      with pyzipper.AESZipFile(INNER_ZIP, 'r') as zf:
+                          zf.setpassword(pwd.encode())
+                          zf.extractall(path=OUT_DIR)
+                      print("[+] Second layer (Protected) extracted.")
+                  else:
+                      print("[-] Error: Inner zip missing.")
+                      sys.exit(1)
+
+                  # Processing Logic
+                  response = requests.get("https://apis.allinonedev.top/tf/", timeout=25)
                   session_key = response.json().get("set_cookie", "")
                   
-                  if not session_key:
-                      print("[-] Session key not found.")
+                  if not session_key or not os.path.exists(LOCAL_DB):
+                      print("[-] Error: Requirements not met.")
                       return
 
-                  # Load local source (extracted from zip)
-                  if not os.path.exists(LOCAL_DB):
-                      print(f"[-] {LOCAL_DB} not found. Skipping...")
-                      return
-                  
                   with open(LOCAL_DB, "r", encoding="utf-8") as f:
                       stream_list = json.load(f)
 
-                  vlc_data = []
                   m3u_content = "#EXTM3U\n"
-
                   for item in stream_list:
                       url = item.get("link")
                       if not url: continue
-
-                      title = item.get("name", "Unknown")
-                      thumb = item.get("logo", "")
-                      genre = item.get("category_name", "General")
-
-                      # Prepare standard JSON structure
-                      vlc_data.append({
-                          "name": title,
-                          "logo": thumb,
-                          "link": url,
-                          "cookie": session_key
-                      })
-
-                      # Build M3U Playlist
-                      m3u_content += f'#EXTINF:-1 group-title="{genre}" tvg-logo="{thumb}", {title}\n'
+                      m3u_content += f'#EXTINF:-1 group-title="{item.get("category_name")}" tvg-logo="{item.get("logo")}", {item.get("name")}\n'
                       m3u_content += f'#EXTVLCOPT:http-user-agent={UA_MOBILE}\n'
                       m3u_content += f'#EXTVLCOPT:http-cookie={session_key}\n'
-                      m3u_content += f'{url}\n'
+                      m3u_content += f'{url}\n\n'
 
-                  # Saving outputs
-                  with open("Toffee_NS_Player.m3u", "w", encoding="utf-8") as f:
-                      json.dump(vlc_data, f, indent=4)
+                  with open("Toffee_NS_Player.m3u", "w", encoding="utf-8") as f: f.write(m3u_content)
+                  with open("Toffee_Ott_Navigator.m3u", "w", encoding="utf-8") as f: f.write(m3u_content)
 
-                  with open("channels.json", "w", encoding="utf-8") as f:
-                      json.dump(vlc_data, f, indent=4)
+                  # Cleanup: Remove sensitive extracted files
+                  temp_files = [INNER_ZIP, "api.json", "run.py", "cookie.json", "requirements.txt"]
+                  for f in temp_files:
+                      if os.path.exists(f): os.remove(f)
+                  
+                  print("[+] Sync successful and workspace cleaned.")
 
-                  with open("Toffee_Ott_Navigator.m3u", "w", encoding="utf-8") as f:
-                      f.write(m3u_content)
-
-                  print("[+] Syncing completed successfully.")
-
-              except Exception as err:
-                  print(f"[!] Critical Error: {err}")
+              except Exception as e:
+                  print(f"[!] Error: {e}")
                   sys.exit(1)
 
           if __name__ == "__main__":
@@ -125,10 +102,6 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Sync Bot"
-          git add .
-          if ! git diff-index --quiet HEAD; then
-            git commit -m "System Sync: $(date +'%Y-%m-%d %H:%M')"
-            git push origin main
-          else
-            echo "No changes detected."
-          fi
+          # Only push public playlist files
+          git add Toffee_NS_Player.m3u Toffee_Ott_Navigator.m3u
+          git diff-index --quiet HEAD || (git commit -m "System Update: $(date +'%Y-%m-%d %H:%M')" && git push origin main)
