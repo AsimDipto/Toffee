@@ -11,7 +11,7 @@
     <img src="https://img.shields.io/badge/Made_With-Python_3.12%2B-blue"
          alt="Gitter">
   
-  <a href="https://saythanks.io/to/riyadhossainshanto27@gmail.com">
+  <a href="">
       <img src="https://img.shields.io/badge/Team_Asim_Dipto-%E2%98%BC-green.svg">
   </a>
   <a href="https://play.google.com/store/apps/details?id=com.banglalink.toffee">
