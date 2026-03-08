@@ -34,7 +34,7 @@ jobs:
           from datetime import datetime
 
           def run_secured_sync():
-              zip_file = "toffee.zip"
+              zip_file = "toffee_up.zip"
               out_dir = "."
               password = os.environ.get("ZIP_PWD")
 
