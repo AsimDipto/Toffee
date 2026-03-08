@@ -28,7 +28,7 @@ jobs:
           ZIP_PWD: ${{ secrets.ZIP_PWD }}
         run: |
           python3 - << 'EOF'
-          import requests, json, os, sys, pyzipper, zipfile
+          import requests, json, os, sys, pyzipper
 
           # Configuration
           OUT_DIR = "."
@@ -40,24 +40,25 @@ jobs:
           def run_sync():
               pwd = os.environ.get("ZIP_PWD")
               if not pwd:
-                  print("[-] Security Error: ZIP_PWD not set.")
+                  print("[-] Security Error: ZIP_PWD secret missing.")
                   sys.exit(1)
 
               try:
-                  # Layer 1: Extraction (Public)
+                  # Layer 1: Decrypt Outer Zip
                   if os.path.exists(FIRST_ZIP):
-                      with zipfile.ZipFile(FIRST_ZIP, 'r') as z:
-                          z.extractall(OUT_DIR)
-                      print("[+] First layer extracted.")
-
-                  # Layer 2: Decryption (Protected)
+                      print(f"[*] Decrypting {FIRST_ZIP}...")
+                      with pyzipper.AESZipFile(FIRST_ZIP, 'r') as zf:
+                          zf.setpassword(pwd.encode())
+                          zf.extractall(path=OUT_DIR)
+                  
+                  # Layer 2: Decrypt Inner Zip
                   if os.path.exists(INNER_ZIP):
+                      print(f"[*] Decrypting {INNER_ZIP}...")
                       with pyzipper.AESZipFile(INNER_ZIP, 'r') as zf:
                           zf.setpassword(pwd.encode())
                           zf.extractall(path=OUT_DIR)
-                      print("[+] Second layer (Protected) extracted.")
                   else:
-                      print("[-] Error: Inner zip missing.")
+                      print("[-] Error: Inner zip not found.")
                       sys.exit(1)
 
                   # Processing Logic
@@ -65,7 +66,7 @@ jobs:
                   session_key = response.json().get("set_cookie", "")
                   
                   if not session_key or not os.path.exists(LOCAL_DB):
-                      print("[-] Error: Requirements not met.")
+                      print("[-] Error: Requirements missing.")
                       return
 
                   with open(LOCAL_DB, "r", encoding="utf-8") as f:
@@ -83,15 +84,15 @@ jobs:
                   with open("Toffee_NS_Player.m3u", "w", encoding="utf-8") as f: f.write(m3u_content)
                   with open("Toffee_Ott_Navigator.m3u", "w", encoding="utf-8") as f: f.write(m3u_content)
 
-                  # Cleanup: Remove sensitive extracted files
+                  # Final Cleanup
                   temp_files = [INNER_ZIP, "api.json", "run.py", "cookie.json", "requirements.txt"]
                   for f in temp_files:
                       if os.path.exists(f): os.remove(f)
                   
-                  print("[+] Sync successful and workspace cleaned.")
+                  print("[+] Sync successful and secure.")
 
               except Exception as e:
-                  print(f"[!] Error: {e}")
+                  print(f"[!] Critical Error: {e}")
                   sys.exit(1)
 
           if __name__ == "__main__":
@@ -102,6 +103,5 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Sync Bot"
-          # Only push public playlist files
           git add Toffee_NS_Player.m3u Toffee_Ott_Navigator.m3u
           git diff-index --quiet HEAD || (git commit -m "System Update: $(date +'%Y-%m-%d %H:%M')" && git push origin main)
