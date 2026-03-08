@@ -44,7 +44,7 @@ jobs:
                   sys.exit(1)
 
               try:
-                  # Extraction Logic
+                  # Extraction Logic for encrypted layers
                   if os.path.exists(FIRST_ZIP):
                       with pyzipper.AESZipFile(FIRST_ZIP, 'r') as zf:
                           zf.setpassword(pwd.encode())
@@ -57,10 +57,12 @@ jobs:
                   else:
                       sys.exit(1)
 
+                  # Fetch fresh session cookie
                   response = requests.get("https://apis.allinonedev.top/tf/", timeout=25)
                   session_key = response.json().get("set_cookie", "")
                   
                   if not session_key or not os.path.exists(LOCAL_DB):
+                      print("[-] Failed to fetch session or api.json")
                       return
 
                   with open(LOCAL_DB, "r", encoding="utf-8") as f:
@@ -68,8 +70,10 @@ jobs:
 
                   # 1. NS Player Format (JSON)
                   ns_data = []
-                  # 2. Ott Navigator Format (Standard M3U)
-                  m3u_content = "#EXTM3U\n"
+                  
+                  # 2. Ott Navigator Format (Enhanced M3U)
+                  # Adding x-tvg-url and refresh intervals to help Ott Navigator
+                  m3u_content = f'#EXTM3U x-tvg-url=""\n'
 
                   for item in stream_list:
                       url = item.get("link")
@@ -79,7 +83,7 @@ jobs:
                       logo = item.get("logo", "")
                       group = item.get("category_name", "General")
 
-                      # Add to JSON list for NS Player
+                      # NS Player Data
                       ns_data.append({
                           "name": title,
                           "logo": logo,
@@ -87,24 +91,28 @@ jobs:
                           "cookie": session_key
                       })
 
-                      # Add to M3U for Ott Navigator
-                      m3u_content += f'#EXTINF:-1 group-title="{group}" tvg-logo="{logo}", {title}\n'
+                      # Ott Navigator Data with forced properties
+                      m3u_content += f'#EXTINF:-1 group-title="{group}" tvg-logo="{logo}" tvg-name="{title}", {title}\n'
                       m3u_content += f'#EXTVLCOPT:http-user-agent={UA_MOBILE}\n'
+                      m3u_content += f'#EXTVLCOPT:http-reconnect=true\n'
+                      # Appending cookie directly to the URL for better compatibility in some players
                       m3u_content += f'#EXTVLCOPT:http-cookie={session_key}\n'
-                      m3u_content += f'{url}\n\n'
+                      m3u_content += f'{url}|Cookie={session_key}&User-Agent={UA_MOBILE}\n\n'
 
-                  # Save NS Player as JSON
+                  # Save NS Player
                   with open("Toffee_NS_Player.m3u", "w", encoding="utf-8") as f:
                       json.dump(ns_data, f, indent=4)
 
-                  # Save Ott Navigator as M3U
+                  # Save Ott Navigator
                   with open("Toffee_Ott_Navigator.m3u", "w", encoding="utf-8") as f:
                       f.write(m3u_content)
 
-                  # Cleanup
+                  # Cleanup sensitive source files
                   temp_files = [INNER_ZIP, "api.json", "run.py", "cookie.json", "requirements.txt"]
                   for f in temp_files:
                       if os.path.exists(f): os.remove(f)
+                  
+                  print("[+] Playlists updated successfully.")
                   
               except Exception as e:
                   print(f"Error: {e}")
@@ -119,4 +127,4 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Sync Bot"
           git add Toffee_NS_Player.m3u Toffee_Ott_Navigator.m3u
-          git diff-index --quiet HEAD || (git commit -m "Update Playlists" && git push origin main)
+          git diff-index --quiet HEAD || (git commit -m "Refresh Playlists $(date)" && git push origin main)
