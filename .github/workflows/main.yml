@@ -1,4 +1,4 @@
-name: "Toffee Auto Update"
+name: "Stream Sync Pro - Secured"
 
 on:
   schedule:
@@ -31,15 +31,18 @@ jobs:
         run: |
           python3 - << 'EOF'
           import requests, json, os, sys, pyzipper
-          from datetime import datetime
 
           def run_secured_sync():
-              zip_file = "toffee_up.zip"
+              zip_file = "toffe_up.zip"
               out_dir = "."
               password = os.environ.get("ZIP_PWD")
 
               if not password:
                   print("[-] Security Error: ZIP_PWD not set.")
+                  sys.exit(1)
+
+              if not os.path.exists(zip_file):
+                  print(f"[-] Error: {zip_file} not found.")
                   sys.exit(1)
 
               try:
@@ -48,11 +51,9 @@ jobs:
                       zf.setpassword(password.encode())
                       zf.extractall(path=out_dir)
                   
-                  # Identify extracted data dynamically to maintain privacy
-                  # Assuming the source file is a JSON format
                   data_file = "api.json" 
                   if not os.path.exists(data_file):
-                      print("[-] Integrity Error: Required assets not found.")
+                      print("[-] Error: api.json missing.")
                       return
 
                   # Fetch session token
@@ -61,15 +62,14 @@ jobs:
                   session_key = response.json().get("set_cookie", "")
                   
                   if not session_key:
-                      print("[-] Network Error: Authentication failed.")
+                      print("[-] Auth Error: Session key failed.")
                       return
 
                   with open(data_file, "r", encoding="utf-8") as f:
                       stream_list = json.load(f)
 
-                  vlc_data = []
-                  m3u_header = "#EXTM3U\n# Creator : Asim Dipto\n# Fuck you Ankita\n\n"
-                  m3u_body = ""
+                  vlc_json_data = []
+                  m3u_final = "#EXTM3U\n\n"
 
                   for item in stream_list:
                       url = item.get("link")
@@ -79,31 +79,32 @@ jobs:
                       thumb = item.get("logo", "")
                       genre = item.get("category_name", "General")
 
-                      vlc_data.append({
+                      # Add to JSON list for channels.json compatibility
+                      vlc_json_data.append({
                           "name": title,
                           "logo": thumb,
                           "link": url,
                           "cookie": session_key
                       })
 
-                      m3u_body += f'#EXTINF:-1 group-title="{genre}" tvg-logo="{thumb}", {title}\n'
-                      m3u_body += f'#EXTVLCOPT:http-user-agent={os.environ.get("UA_MOBILE")}\n'
-                      m3u_body += f'#EXTVLCOPT:http-cookie={session_key}\n'
-                      m3u_body += f'{url}\n\n'
+                      # Build Raw M3U String (Correct format for NS Player)
+                      m3u_final += f'#EXTINF:-1 group-title="{genre}" tvg-logo="{thumb}", {title}\n'
+                      m3u_final += f'#EXTVLCOPT:http-user-agent={os.environ.get("UA_MOBILE")}\n'
+                      m3u_final += f'#EXTVLCOPT:http-cookie={session_key}\n'
+                      m3u_final += f'{url}\n\n'
 
-                  # Generating Final Outputs
-                  final_m3u = m3u_header + m3u_body
-
+                  # Write as RAW M3U Text (Not JSON)
                   with open("Toffee_NS_Player.m3u", "w", encoding="utf-8") as f:
-                      f.write(final_m3u)
+                      f.write(m3u_final)
 
                   with open("Toffee_Ott_Navigator.m3u", "w", encoding="utf-8") as f:
-                      f.write(final_m3u)
+                      f.write(m3u_final)
 
+                  # Keep channels.json as standard JSON
                   with open("channels.json", "w", encoding="utf-8") as f:
-                      json.dump(vlc_data, f, indent=4)
+                      json.dump(vlc_json_data, f, indent=4)
 
-                  print("[+] Deployment completed successfully.")
+                  print("[+] Deployment successful. Formats corrected.")
 
               except Exception as err:
                   print(f"[!] Runtime Exception: {err}")
