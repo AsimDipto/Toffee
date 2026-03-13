@@ -28,65 +28,51 @@ jobs:
           ZIP_PWD: ${{ secrets.ZIP_PWD }}
         run: |
           python3 - << 'EOF'
-          import requests, json, os, sys, pyzipper, shutil
+          import requests, json, os, sys, pyzipper
 
           # Configuration
           OUT_DIR = "."
-          ZIP_NAME = "toffee_update.zip" 
-          TEMP_ZIP = "temp_inner.zip"
+          FIRST_ZIP = "toffee_update.zip" 
+          INNER_ZIP = "toffee_update.zip" 
           LOCAL_DB = "api.json"
           UA_MOBILE = "Toffee (Linux;Android 14)"
 
           def run_sync():
               pwd = os.environ.get("ZIP_PWD")
               if not pwd:
-                  print("[-] ERROR: ZIP_PWD secret is missing in GitHub Settings.")
+                  print("[-] Error: ZIP_PWD missing.")
                   sys.exit(1)
 
               try:
-                  # --- LAYER 1: Extract the outer zip ---
-                  if not os.path.exists(ZIP_NAME):
-                      print(f"[-] ERROR: {ZIP_NAME} not found in repository.")
-                      sys.exit(1)
+                  # Extraction Logic for encrypted layers
+                  if os.path.exists(FIRST_ZIP):
+                      with pyzipper.AESZipFile(FIRST_ZIP, 'r') as zf:
+                          zf.setpassword(pwd.encode())
+                          zf.extractall(path=OUT_DIR)
                   
-                  print("[+] Extracting Layer 1...")
-                  with pyzipper.AESZipFile(ZIP_NAME, 'r') as zf:
-                      zf.setpassword(pwd.encode())
-                      # We rename the inner zip during extraction to avoid conflict
-                      # If the inner file is also named 'toffee_update.zip', we extract it carefully
-                      zf.extractall(path="layer1_out")
-                  
-                  # Find the inner zip (assuming it's inside layer1_out)
-                  inner_path = os.path.join("layer1_out", ZIP_NAME)
-                  
-                  # --- LAYER 2: Extract the inner zip ---
-                  if os.path.exists(inner_path):
-                      print("[+] Extracting Layer 2 (Inner Zip)...")
-                      with pyzipper.AESZipFile(inner_path, 'r') as zf:
+                  if os.path.exists(INNER_ZIP):
+                      with pyzipper.AESZipFile(INNER_ZIP, 'r') as zf:
                           zf.setpassword(pwd.encode())
                           zf.extractall(path=OUT_DIR)
                   else:
-                      print("[-] ERROR: Inner zip not found after Layer 1 extraction.")
                       sys.exit(1)
 
-                  # --- DATA PROCESSING ---
-                  if not os.path.exists(LOCAL_DB):
-                      print(f"[-] ERROR: {LOCAL_DB} not found after extraction.")
-                      sys.exit(1)
-
-                  # Fetch session
-                  print("[+] Fetching session key...")
+                  # Fetch fresh session cookie
                   response = requests.get("https://apis.allinonedev.top/tf/", timeout=25)
                   session_key = response.json().get("set_cookie", "")
                   
-                  if not session_key:
-                      print("[-] ERROR: Failed to fetch session cookie.")
-                      sys.exit(1)
+                  if not session_key or not os.path.exists(LOCAL_DB):
+                      print("[-] Failed to fetch session or api.json")
+                      return
 
                   with open(LOCAL_DB, "r", encoding="utf-8") as f:
                       stream_list = json.load(f)
 
+                  # 1. NS Player Format (JSON)
                   ns_data = []
+                  
+                  # 2. Ott Navigator Format (Enhanced M3U)
+                  # Adding x-tvg-url and refresh intervals to help Ott Navigator
                   m3u_content = f'#EXTM3U x-tvg-url=""\n'
 
                   for item in stream_list:
@@ -97,32 +83,39 @@ jobs:
                       logo = item.get("logo", "")
                       group = item.get("category_name", "General")
 
+                      # NS Player Data
                       ns_data.append({
-                          "name": title, "logo": logo, "link": url, "cookie": session_key
+                          "name": title,
+                          "logo": logo,
+                          "link": url,
+                          "cookie": session_key
                       })
 
+                      # Ott Navigator Data with forced properties
                       m3u_content += f'#EXTINF:-1 group-title="{group}" tvg-logo="{logo}" tvg-name="{title}", {title}\n'
                       m3u_content += f'#EXTVLCOPT:http-user-agent={UA_MOBILE}\n'
+                      m3u_content += f'#EXTVLCOPT:http-reconnect=true\n'
+                      # Appending cookie directly to the URL for better compatibility in some players
                       m3u_content += f'#EXTVLCOPT:http-cookie={session_key}\n'
                       m3u_content += f'{url}|Cookie={session_key}&User-Agent={UA_MOBILE}\n\n'
 
-                  # Save Files
-                  with open("Toffee_NS_Player.json", "w", encoding="utf-8") as f:
+                  # Save NS Player
+                  with open("Toffee_NS_Player.m3u", "w", encoding="utf-8") as f:
                       json.dump(ns_data, f, indent=4)
 
+                  # Save Ott Navigator
                   with open("Toffee_Ott_Navigator.m3u", "w", encoding="utf-8") as f:
                       f.write(m3u_content)
 
-                  # --- CLEANUP ---
-                  print("[+] Cleaning up sensitive files...")
-                  if os.path.exists("layer1_out"): shutil.rmtree("layer1_out")
-                  for extra in [LOCAL_DB, "run.py", "cookie.json", "requirements.txt"]:
-                      if os.path.exists(extra): os.remove(extra)
+                  # Cleanup sensitive source files
+                  temp_files = [INNER_ZIP, "api.json", "run.py", "cookie.json", "requirements.txt"]
+                  for f in temp_files:
+                      if os.path.exists(f): os.remove(f)
                   
-                  print("[+] DONE: Playlists updated successfully.")
+                  print("[+] Playlists updated successfully.")
                   
               except Exception as e:
-                  print(f"[-] CRITICAL ERROR: {str(e)}")
+                  print(f"Error: {e}")
                   sys.exit(1)
 
           if __name__ == "__main__":
@@ -133,5 +126,6 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Sync Bot"
-          git add Toffee_NS_Player.json Toffee_Ott_Navigator.m3u
+          git add Toffee_NS_Player.m3u Toffee_Ott_Navigator.m3u
           git diff-index --quiet HEAD || (git commit -m "Refresh Playlists $(date)" && git push origin main)
+          
